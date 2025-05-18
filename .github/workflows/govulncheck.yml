@@ -1,0 +1,24 @@
+name: Go Vulnerability Check
+
+on:
+  push:
+    branches:
+      - ai-vulncheck-hackaton-poc
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        run: govulncheck ./...
+        continue-on-error: true
