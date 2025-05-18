@@ -36,7 +36,7 @@ def analyze_vulnerabilities(entries):
     config = None
     sbom = None
     vulnerabilities = []
-    findings = []
+    findings_dict = {}
     
     for entry in entries:
         if "config" in entry:
@@ -48,13 +48,38 @@ def analyze_vulnerabilities(entries):
             vuln = {
                 "ID": entry["osv"].get("id"),
                 "Summary": entry["osv"].get("summary", "Not available"),
+                "Details": entry["osv"].get("details", "Not available"),
                 "Package": entry["osv"]["affected"][0]["package"]["name"] if entry["osv"].get("affected") else "N/A",
+                "Introduced": entry["osv"]["affected"][0]["ranges"][0]["events"][0].get("introduced", "Not available"),
+                "Fixed": entry["osv"]["affected"][0]["ranges"][0]["events"][0].get("fixed", "Not available")
             }
             vulnerabilities.append(vuln)
         elif "finding" in entry:
-            findings.append(entry["finding"])
+            finding = entry["finding"]
+            osv_id = finding["osv"]
+            
+            # Use dictionary to avoid duplicates
+            if osv_id not in findings_dict:
+                findings_dict[osv_id] = {
+                    "osv": osv_id,
+                    "fixed_version": finding.get("fixed_version", "Not specified"),
+                    "traces": []
+                }
+            
+            # Add all traces for this finding
+            for trace in finding.get("trace", []):
+                if trace.get("module") != "stdlib":
+                    trace_info = {
+                        "module": trace.get("module", "Unknown"),
+                        "version": trace.get("version", "Unknown"),
+                        "package": trace.get("package", "Unknown"),
+                        "function": trace.get("function", "Unknown"),
+                        "receiver": trace.get("receiver", ""),
+                        "position": trace.get("position", {})
+                    }
+                    findings_dict[osv_id]["traces"].append(trace_info)
     
-    return config, sbom, vulnerabilities, findings
+    return config, sbom, vulnerabilities, list(findings_dict.values())
 
 def chunk_vulnerabilities(vulns, chunk_size=10):
     """Split vulnerabilities into smaller groups"""
@@ -64,8 +89,8 @@ def build_prompt(vulns):
     return f"""
 Analyze these Go vulnerabilities and classify them. Return the result in JSON format with this structure:
 {{
-    "stdlib": [{{"id": "ID", "summary": "brief description", "severity": "high/medium/low"}}],
-    "third_party": [{{"id": "ID", "summary": "brief description", "severity": "high/medium/low"}}]
+    "stdlib": [{{"id": "ID", "summary": "brief description", "severity": "high/medium/low", "details": "detailed description", "introduced": "version", "fixed": "version"}}],
+    "third_party": [{{"id": "ID", "summary": "brief description", "severity": "high/medium/low", "details": "detailed description", "introduced": "version", "fixed": "version"}}]
 }}
 
 Vulnerabilities to analyze:
@@ -87,6 +112,30 @@ def summarize_with_llm(prompt):
         print(f"Error calling OpenAI: {str(e)}")
         return None
 
+def print_findings_details(findings):
+    if not findings:
+        print("🔍 No specific findings in your code.\n")
+        return
+
+    print("🔍 Findings Analysis (Vulnerabilities in Your Code):")
+    print("   These vulnerabilities have direct traces to your codebase:\n")
+
+    for finding in findings:
+        print(f"   🔴 {finding['osv']}:")
+        print(f"      Fixed in version: {finding['fixed_version']}")
+        if finding['traces']:
+            print("      Traces in your code:")
+            for trace in finding['traces']:
+                filename = trace['position'].get('filename', 'Unknown file')
+                line = trace['position'].get('line', 'Unknown line')
+                module_info = f"{trace['module']}@{trace['version']}" if trace['version'] != "Unknown" else trace['module']
+                func_info = f"{trace['function']}"
+                if trace['receiver']:
+                    func_info = f"({trace['receiver']}).{func_info}"
+                print(f"      → {module_info}/{trace['package']}.{func_info}")
+                print(f"        at {filename}:{line}")
+        print()
+
 def print_basic_info(config, sbom, vulns, findings):
     if config:
         print("📋 Scan Configuration:")
@@ -102,8 +151,9 @@ def print_basic_info(config, sbom, vulns, findings):
             print(f"   - {module.get('path', 'Path not available')}")
         print()
 
-    print(f"🔨 Vulnerabilities found: {len(vulns)}")
-    print(f"🔍 Specific findings: {len(findings)}\n")
+    print(f"🔨 Total vulnerabilities found: {len(vulns)}")
+    print(f"🔍 Vulnerabilities affecting your code: {len(findings)}\n")
+
 
 def format_final_output(all_results, errors):
     # Combine all results
@@ -219,6 +269,10 @@ def main():
             print(f"\n📊 Processing Statistics:")
             print(f"   - Successfully processed chunks: {processed_chunks}/{len(chunks)}")
             print(f"   - Chunks with errors: {error_chunks}/{len(chunks)}")
+            
+            # Show detailed findings analysis at the end
+            print("\n=== Findings Analysis ===\n")
+            print_findings_details(findings)
             
             # Show error details if requested
             if args.show_errors and errors:
