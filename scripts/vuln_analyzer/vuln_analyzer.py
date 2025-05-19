@@ -112,19 +112,32 @@ def summarize_with_llm(prompt):
         print(f"Error calling OpenAI: {str(e)}")
         return None
 
-def print_findings_details(findings):
+class OutputCapture:
+    def __init__(self):
+        self.output = []
+
+    def print(self, *args, **kwargs):
+        # Capture the output and also print it
+        output_str = ' '.join(str(arg) for arg in args)
+        self.output.append(output_str)
+        print(output_str, **kwargs)
+
+    def get_output(self):
+        return '\n'.join(self.output)
+
+def print_findings_details(findings, printer=print):
     if not findings:
-        print("🔍 No specific findings in your code.\n")
+        printer("🔍 No specific findings in your code.\n")
         return
 
-    print("🔍 Findings Analysis (Vulnerabilities in Your Code):")
-    print("   These vulnerabilities have direct traces to your codebase:\n")
+    printer("🔍 Findings Analysis (Vulnerabilities in Your Code):")
+    printer("   These vulnerabilities have direct traces to your codebase:\n")
 
     for finding in findings:
-        print(f"   🔴 {finding['osv']}:")
-        print(f"      Fixed in version: {finding['fixed_version']}")
+        printer(f"   🔴 {finding['osv']}:")
+        printer(f"      Fixed in version: {finding['fixed_version']}")
         if finding['traces']:
-            print("      Traces in your code:")
+            printer("      Traces in your code:")
             for trace in finding['traces']:
                 filename = trace['position'].get('filename', 'Unknown file')
                 line = trace['position'].get('line', 'Unknown line')
@@ -132,27 +145,27 @@ def print_findings_details(findings):
                 func_info = f"{trace['function']}"
                 if trace['receiver']:
                     func_info = f"({trace['receiver']}).{func_info}"
-                print(f"      → {module_info}/{trace['package']}.{func_info}")
-                print(f"        at {filename}:{line}")
-        print()
+                printer(f"      → {module_info}/{trace['package']}.{func_info}")
+                printer(f"        at {filename}:{line}")
+        printer("")
 
-def print_basic_info(config, sbom, vulns, findings):
+def print_basic_info(config, sbom, vulns, findings, printer=print):
     if config:
-        print("📋 Scan Configuration:")
-        print(f"   Scanner: {config['scanner_name']} v{config['scanner_version']}")
-        print(f"   Database: {config['db']}")
-        print(f"   Last update: {config['db_last_modified']}")
-        print(f"   Go version: {config['go_version']}\n")
+        printer("📋 Scan Configuration:")
+        printer(f"   Scanner: {config['scanner_name']} v{config['scanner_version']}")
+        printer(f"   Database: {config['db']}")
+        printer(f"   Last update: {config['db_last_modified']}")
+        printer(f"   Go version: {config['go_version']}\n")
     
     if sbom:
-        print("📦 SBOM Information:")
-        print(f"   Modules found: {len(sbom['modules'])}")
+        printer("📦 SBOM Information:")
+        printer(f"   Modules found: {len(sbom['modules'])}")
         for module in sbom['modules']:
-            print(f"   - {module.get('path', 'Path not available')}")
-        print()
+            printer(f"   - {module.get('path', 'Path not available')}")
+        printer("")
 
-    print(f"🔨 Total vulnerabilities found: {len(vulns)}")
-    print(f"🔍 Vulnerabilities affecting your code: {len(findings)}\n")
+    printer(f"🔨 Total vulnerabilities found: {len(vulns)}")
+    printer(f"🔍 Vulnerabilities affecting your code: {len(findings)}\n")
 
 
 def format_final_output(all_results, errors):
@@ -192,30 +205,34 @@ def format_final_output(all_results, errors):
 
     return "\n".join(output)
 
-def print_legend():
-    print("=== Analysis Legend ===\n")
-    print("Severity Levels:")
-    print("  🔴 High   - Critical vulnerabilities requiring immediate attention")
-    print("  🟡 Medium - Important issues that should be addressed soon")
-    print("  🟢 Low    - Minor issues that should be reviewed when possible")
-    print("  ⚪ Unknown - Severity level not determined\n")
+def print_legend(printer=print):
+    printer("=== Analysis Legend ===\n")
+    printer("Severity Levels:")
+    printer("  🔴 High   - Critical vulnerabilities requiring immediate attention")
+    printer("  🟡 Medium - Important issues that should be addressed soon")
+    printer("  🟢 Low    - Minor issues that should be reviewed when possible")
+    printer("  ⚪ Unknown - Severity level not determined\n")
     
-    print("Vulnerability Categories:")
-    print("  🔧 Standard Library - Issues in Go's standard library")
-    print("  📦 Third-party     - Issues in external dependencies\n")
-    print("Additional Indicators:")
-    print("  📋 Configuration information")
-    print("  🔨 Total vulnerabilities count")
-    print("  🔍 Specific findings details")
-    print("  📊 Processing statistics")
-    print("-" * 50 + "\n")
+    printer("Vulnerability Categories:")
+    printer("  🔧 Standard Library - Issues in Go's standard library")
+    printer("  📦 Third-party     - Issues in external dependencies\n")
+    printer("Additional Indicators:")
+    printer("  📋 Configuration information")
+    printer("  🔨 Total vulnerabilities count")
+    printer("  🔍 Specific findings details")
+    printer("  📊 Processing statistics")
+    printer("-" * 50 + "\n")
 
 def main():
     parser = argparse.ArgumentParser(description="Analyze govulncheck.json output with OpenAI assistance.")
     parser.add_argument('json_file', help='govulncheck JSON file')
     parser.add_argument('--chunk-size', type=int, default=5, help='Number of vulnerabilities per chunk')
     parser.add_argument('--show-errors', action='store_true', help='Show error details')
+    parser.add_argument('--output-file', type=str, default='vuln_analysis.txt', help='Output file for results')
     args = parser.parse_args()
+
+    # Create output capture
+    output = OutputCapture()
 
     try:
         # Load and analyze JSON
@@ -223,18 +240,18 @@ def main():
         config, sbom, vulns, findings = analyze_vulnerabilities(entries)
 
         # Print legend
-        print_legend()
+        print_legend(output.print)
         
         # Show basic information
-        print_basic_info(config, sbom, vulns, findings)
+        print_basic_info(config, sbom, vulns, findings, output.print)
 
         # Generate detailed analysis with LLM
         if vulns:
-            print("🤖 Generating detailed AI analysis...\n")
+            output.print("🤖 Generating detailed AI analysis...\n")
             
             # Split vulnerabilities into smaller chunks
             chunks = chunk_vulnerabilities(vulns, args.chunk_size)
-            print(f"Analyzing {len(vulns)} vulnerabilities in {len(chunks)} groups...")
+            output.print(f"Analyzing {len(vulns)} vulnerabilities in {len(chunks)} groups...")
             
             # Accumulate results and errors
             all_results = []
@@ -262,17 +279,21 @@ def main():
                 if i < len(chunks):
                     time.sleep(2)
             
-            print("\n\n=== Vulnerability Summary ===\n")
-            print(format_final_output(all_results, errors))
+            output.print("\n\n=== Vulnerability Summary ===\n")
+            output.print(format_final_output(all_results, errors))
             
             # Show processing statistics
-            print(f"\n📊 Processing Statistics:")
-            print(f"   - Successfully processed chunks: {processed_chunks}/{len(chunks)}")
-            print(f"   - Chunks with errors: {error_chunks}/{len(chunks)}")
+            output.print(f"\n📊 Processing Statistics:")
+            output.print(f"   - Successfully processed chunks: {processed_chunks}/{len(chunks)}")
+            output.print(f"   - Chunks with errors: {error_chunks}/{len(chunks)}")
             
             # Show detailed findings analysis at the end
-            print("\n=== Findings Analysis ===\n")
-            print_findings_details(findings)
+            output.print("\n=== Findings Analysis ===\n")
+            print_findings_details(findings, output.print)
+            
+            # Save output to file
+            with open(args.output_file, 'w', encoding='utf-8') as f:
+                f.write(output.get_output())
             
             # Show error details if requested
             if args.show_errors and errors:

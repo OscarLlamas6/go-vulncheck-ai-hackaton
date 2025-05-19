@@ -33,7 +33,17 @@ jobs:
         continue-on-error: true
 
       - name: Analyze vulnerabilities
-        run: python3 scripts/vuln_analyzer/vuln_analyzer_combined.py govulncheck_results.json --chunk-size 5
+        run: python3 scripts/vuln_analyzer/vuln_analyzer.py govulncheck_results.json --chunk-size 10 --output-file vuln_analysis.txt
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         continue-on-error: true
+
+      - name: Send to Slack
+        if: always()
+        run: |
+          content=$(cat vuln_analysis.txt)
+          curl -X POST \
+          -H 'Content-type: application/json' \
+          -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+          --data "{\"channel\": \"${{ secrets.SLACK_CHANNEL_ID }}\", \"text\": \"$content\"}" \
+          https://slack.com/api/chat.postMessage
